@@ -13,3 +13,13 @@ export type WACallEvent = {
 	offline: boolean
 	latencyMs?: number
 }
+
+export type CallInitOptions = {
+	/** enable audio for the call offer (video support added later) */
+	audio?: boolean
+}
+
+export type CallInitResult = {
+	callId: string
+	status: 'ringing' | 'failed'
+}
