@@ -4,6 +4,8 @@ import { proto } from '../../WAProto/index.js'
 import { DEFAULT_CACHE_TTLS, WA_DEFAULT_EPHEMERAL } from '../Defaults'
 import type {
 	AnyMessageContent,
+	CallInitOptions,
+	CallInitResult,
 	MediaConnInfo,
 	MessageReceiptType,
 	MessageRelayOptions,
@@ -1137,7 +1139,76 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 
 	const waUploadToServer = getWAUploadToServer(config, refreshMediaConn)
 
+	const waitForCallUpdate = bindWaitForEvent(ev, 'call')
 	const waitForMsgMediaUpdate = bindWaitForEvent(ev, 'messages.media-update')
+
+	const initiateCall = async (jid: string, options: CallInitOptions = {}): Promise<CallInitResult> => {
+		const callId = generateMessageIDV2(authState.creds.me?.id)
+		const from = authState.creds.me!.id
+		const to = jidNormalizedUser(jid)
+		const includeAudio = options.audio ?? true
+
+		const offerContent: BinaryNode[] = []
+		if (includeAudio) {
+			offerContent.push({
+				tag: 'audio',
+				attrs: {
+					enc: 'opus',
+					rate: '16000'
+				}
+			})
+		}
+
+		// TODO: validate offer stanza format against live traffic capture
+		offerContent.push(
+			{ tag: 'net', attrs: { medium: '3' } },
+			{ tag: 'encopt', attrs: { 'keying-type': '0' } },
+			{ tag: 'capability', attrs: { ver: '1' } }
+		)
+
+		const stanza: BinaryNode = {
+			tag: 'call',
+			attrs: {
+				from,
+				to
+			},
+			content: [
+				{
+					tag: 'offer',
+					attrs: {
+						'call-id': callId,
+						'call-creator': from
+					},
+					content: offerContent
+				}
+			]
+		}
+
+		await sendNode(stanza)
+
+		let status: CallInitResult['status'] = 'ringing'
+		try {
+			await waitForCallUpdate(async updates => {
+				const update = updates.find(c => c.id === callId)
+				if (!update) {
+					return false
+				}
+
+				if (update.status === 'reject' || update.status === 'timeout' || update.status === 'terminate') {
+					status = 'failed'
+				} else {
+					status = 'ringing'
+				}
+
+				return true
+			}, 30_000)
+		} catch (error) {
+			logger.debug({ error, callId, to }, 'call initiation wait failed or timed out')
+			status = 'failed'
+		}
+
+		return { callId, status }
+	}
 
 	return {
 		...sock,
@@ -1149,6 +1220,7 @@ export const makeMessagesSocket = (config: SocketConfig) => {
 		readMessages,
 		refreshMediaConn,
 		waUploadToServer,
+		initiateCall,
 		fetchPrivacySettings,
 		sendPeerDataOperationMessage,
 		createParticipantNodes,
