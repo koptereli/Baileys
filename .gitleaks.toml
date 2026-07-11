@@ -1,0 +1,8 @@
+[allowlist]
+description = "Allowlist for WhatsApp protocol constants"
+
+# WABinary/constants.ts contains WhatsApp Web protocol token arrays including
+# a Firebase key owned by Meta/WhatsApp, not by this project.
+paths = [
+    "src/WABinary/constants.ts"
+]
